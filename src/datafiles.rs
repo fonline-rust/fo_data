@@ -47,7 +47,7 @@ pub fn parse_datafile<P: AsRef<Path>>(parent_folder: P) -> Result<Vec<crate::FoA
     parse_datafile_inner::<nom::error::VerboseError<_>>(&file)
         //.map_err(|err| Error::Nom(owned_err(err)))
         .map_err(|err| Error::Nom(err.map(|err| nom::error::convert_error(&file, err))))
-        .and_then(|(rest, vec)| {
+        .and_then(|(_rest, vec)| {
             let res: Result<Vec<crate::FoArchive>, Error> = vec
                 .into_iter()
                 .map(|path| datapath(parent_folder.as_ref(), path).and_then(gather_metadata))

@@ -8,7 +8,7 @@ mod palette;
 mod retriever;
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 use std::path::Path;
 pub type PathMap<K, V> = BTreeMap<K, V>;
 pub type ChangeTime = std::time::SystemTime;
@@ -99,8 +99,8 @@ impl FoData {
         client_root: P,
         palette_path: P2,
     ) -> Result<Self, DataInitError> {
-        let data = FoRegistry::init(client_root)?;
-        let retriever = FoRetriever::new(data);
+        let registry = FoRegistry::init(client_root)?;
+        let retriever = registry.into_retriever();
 
         let palette = palette::load_palette(palette_path).map_err(DataInitError::LoadPalette)?;
         let palette = palette.colors_multiply(4);
@@ -188,7 +188,7 @@ impl FoRegistry {
         self.files.len()
     }
     pub fn into_retriever(self) -> FoRetriever {
-        FoRetriever::new(self)
+        FoRetriever::new(Arc::new(self))
     }
     pub fn files(&self) -> impl ExactSizeIterator<Item = (&str, &FileInfo)> {
         self.files.iter().map(|(path, info)| (path.as_str(), info))

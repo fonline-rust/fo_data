@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{FileData, FileLocation, FoRegistry};
 use parking_lot::{MappedMutexGuard as Guard, Mutex, MutexGuard};
 
@@ -15,11 +17,11 @@ type Archive = zip::ZipArchive<std::io::BufReader<std::fs::File>>;
 
 pub struct FoRetriever {
     archives: Vec<Mutex<Option<Box<Archive>>>>,
-    data: FoRegistry,
+    data: Arc<FoRegistry>,
 }
 
 impl FoRetriever {
-    pub fn new(data: FoRegistry) -> Self {
+    pub fn new(data: Arc<FoRegistry>) -> Self {
         let mut archives = Vec::new();
         archives.resize_with(data.archives.len(), Default::default);
         Self { archives, data }
@@ -44,7 +46,7 @@ impl FoRetriever {
             &mut **option.as_mut().expect("Should be some")
         }))
     }
-    pub fn data(&self) -> &FoRegistry {
+    pub fn registry(&self) -> &Arc<FoRegistry> {
         &self.data
     }
     pub fn file_by_info(&self, file_info: &crate::FileInfo) -> Result<bytes::Bytes, Error> {

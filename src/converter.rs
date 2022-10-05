@@ -94,7 +94,7 @@ where
     Ok(match file_type {
         FileType::Png => {
             let data = retriever.file_by_path(path).map_err(Into::into)?;
-            let mut slice = &data[..];
+            let slice = &data[..];
 
             let dynamic = image::load_from_memory_with_format(slice, image::ImageFormat::Png)
                 .map_err(GetImageError::PngDecode)?;

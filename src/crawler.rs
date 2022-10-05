@@ -1,6 +1,6 @@
-use crate::{datafiles::parse_datafile, FileInfo, FileLocation, PathMap};
+use crate::{FileInfo, FileLocation, PathMap};
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug)]
 pub enum Error {}
@@ -25,7 +25,7 @@ pub fn gather_paths(archives: &[crate::FoArchive]) -> Result<PathMap<String, Fil
                 let mut archive_zip = zip::ZipArchive::new(buf_reader).unwrap();
                 let mut local_path_map = PathMap::new();
                 for i in 0..archive_zip.len() {
-                    let mut entry = archive_zip.by_index(i).unwrap();
+                    let entry = archive_zip.by_index(i).unwrap();
                     if entry.is_dir() {
                         continue;
                     }

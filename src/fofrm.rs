@@ -1,4 +1,4 @@
-use nom::{branch::permutation, bytes::complete::tag};
+use nom::bytes::complete::tag;
 use nom_prelude::*;
 
 pub type Arr6<V> = ArrayVec<[V; 6]>;
@@ -274,10 +274,9 @@ mod test {
     #[test]
     fn parse_all_fofrm() {
         let registry = crate::FoRegistry::init(crate::CLIENT_FOLDER).unwrap();
-        use crate::retriever::fo::FoRetriever;
-        let retriever = FoRetriever::new(registry);
+        let retriever = registry.into_retriever();
         //let retriever = crate::test_retriever();
-        for (path, file_info) in &retriever.data().files {
+        for (path, file_info) in &retriever.registry().files {
             if crate::retriever::recognize_type(path) == crate::FileType::FoFrm {
                 let bytes = retriever.file_by_info(file_info).unwrap();
                 let string = std::str::from_utf8(&bytes).unwrap();
@@ -314,7 +313,7 @@ mod test {
                 println!(
                     "Parsing: '{}' from '{:?}': {:#?}",
                     file_info.original_path,
-                    file_info.location(retriever.data()),
+                    file_info.location(retriever.registry()),
                     fofrm
                 );
             }
