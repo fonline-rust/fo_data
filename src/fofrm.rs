@@ -75,7 +75,7 @@ impl<'a> Direction<'a> {
         Ok(())
     }
     fn new_frame(&mut self) -> Result<&mut Frame<'a>, FoFrmErrorKind> {
-        self.end_frame();
+        self.end_frame()?;
         self.frames.push(Default::default());
         Ok(self.frames.last_mut().unwrap())
     }
@@ -274,7 +274,7 @@ mod test {
     #[test]
     fn parse_all_fofrm() {
         let registry = crate::FoRegistry::init(crate::CLIENT_FOLDER).unwrap();
-        use crate::retriever::{fo::FoRetriever, Retriever};
+        use crate::retriever::fo::FoRetriever;
         let retriever = FoRetriever::new(registry);
         //let retriever = crate::test_retriever();
         for (path, file_info) in &retriever.data().files {

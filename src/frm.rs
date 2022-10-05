@@ -4,11 +4,7 @@ use nom::error::context;
 use nom::{
     bytes::complete::take,
     combinator::{cut, verify},
-    //number::streaming::{be_i16, be_u16, be_u32},
     number::complete::{be_i16, be_u16, be_u32},
-    Compare,
-    InputLength,
-    InputTake,
 };
 use nom_prelude::*;
 
@@ -42,10 +38,6 @@ fn parse_frm<'a, Error: ParseError<&'a [u8]>>(i: &'a [u8]) -> IResult<&'a [u8], 
     let (i, x_shifts_per_direction): (_, Arr6<_>) = context("x_shifts", count_array(be_i16))(i)?;
     let (i, y_shifts_per_direction): (_, Arr6<_>) = context("y_shifts", count_array(be_i16))(i)?;
     let (i, _memory_offsets_of_first_frame_per_direction) = count(be_u32, 6)(i)?;
-    /*println!(
-        "memory_offsets: {:?}",
-        _memory_offsets_of_first_frame_per_direction
-    );*/
     let (i, _size_of_frame_area) = be_u32(i)?;
     let (i, directions_frames): (_, Arr6<_>) = context(
         "directions_frames",
@@ -140,30 +132,6 @@ pub fn parse_frame<'a, Error: ParseError<&'a [u8]>>(
             data,
         },
     ))
-}
-
-/*
-pub fn parse_frm<'a, T: 'a, Input: 'a, Error: ParseError<Input>>(
-    tag: T
-) -> impl Fn(Input) -> IResult<Input, Input, Error> where
-    Input: InputTake + Compare<T>,
-    T: InputLength + Clone, {
-
-}
-*/
-/*
-pub fn parse_frm<'a, T: 'a, Input: 'a, Error: ParseError<Input>>(
-    input: Input
-) -> IResult<Input, Input, Error> where
-    Input: InputTake + Compare<T>,
-    T: InputLength + Clone, {
-
-}
-*/
-
-// std::mem::take is unstable
-pub fn mem_take<T: Default>(dest: &mut T) -> T {
-    std::mem::replace(dest, T::default())
 }
 
 #[cfg(test)]

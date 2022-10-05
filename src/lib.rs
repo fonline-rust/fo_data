@@ -2,8 +2,8 @@
 mod converter;
 pub mod crawler;
 pub mod datafiles;
-mod fofrm;
-mod frm;
+pub mod fofrm;
+pub mod frm;
 mod palette;
 mod retriever;
 
@@ -39,8 +39,7 @@ pub struct FileInfo {
     compressed_size: u64,
 }
 impl FileInfo {
-    fn location<'a>(&self, data: &'a FoRegistry) -> Option<&'a std::path::PathBuf> {
-        use std::convert::TryInto;
+    pub fn location<'a>(&self, data: &'a FoRegistry) -> Option<&'a std::path::PathBuf> {
         match self.location {
             FileLocation::Archive(index) => data
                 .archives
@@ -210,9 +209,13 @@ mod test_stuff {
     }
 
     #[cfg(not(feature = "sled-retriever"))]
+    pub fn test_data() -> crate::FoData {
+        crate::FoData::init(CLIENT_FOLDER, palette_path()).unwrap()
+    }
+
+    #[cfg(not(feature = "sled-retriever"))]
     pub fn test_retriever() -> crate::FoRetriever {
-        let fo_data = crate::FoRegistry::init(CLIENT_FOLDER).unwrap();
-        fo_data.into_retriever()
+        crate::FoRegistry::init(CLIENT_FOLDER).unwrap().into_retriever()
     }
 
     #[cfg(feature = "sled-retriever")]
@@ -233,9 +236,9 @@ mod tests {
 
     #[test]
     fn load_frm_from_zip_and_convert_to_png() {
-        let retriever = test_retriever();
+        let data = test_data();
         //"art/tiles/FOM1000.FRM"
-        let image = retriever.get_png("art/tiles/fom1000.frm").unwrap();
+        let image = data.converter().get_png("art/tiles/fom1000.frm").unwrap();
         std::fs::write(test_assets().join("output/FOM1000.png"), image.data).unwrap();
     }
 
@@ -307,7 +310,7 @@ mod tests {
     fn print_frm_animation_info() {
         let retriever = test_retriever();
         let bytes = retriever.file_by_path("art/scenery/gizsign.frm").unwrap();
-        let (rest, frm) = frm::frm_verbose(&bytes).unwrap();
+        let (_rest, frm) = frm::frm_verbose(&bytes).unwrap();
         println!("{:?}", frm);
     }
 }

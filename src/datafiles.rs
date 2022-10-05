@@ -32,13 +32,12 @@ fn datafile_path(parent_folder: &Path) -> Result<PathBuf, Error> {
 
 fn changetime(path: &Path) -> Result<crate::ChangeTime, Error> {
     let metadata = path.metadata().path_err(path, Error::Metadata)?;
-    //map_err(|err| Error::Metadata(datafiles, err) )?;
     metadata.modified().path_err(path, Error::Metadata)
 }
 
 pub fn datafiles_changetime<P: AsRef<Path>>(parent_folder: P) -> Result<crate::ChangeTime, Error> {
     let datafiles = datafile_path(parent_folder.as_ref())?;
-    changetime(parent_folder.as_ref())
+    changetime(datafiles.as_ref())
 }
 
 pub fn parse_datafile<P: AsRef<Path>>(parent_folder: P) -> Result<Vec<crate::FoArchive>, Error> {
