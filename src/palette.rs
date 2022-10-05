@@ -11,22 +11,24 @@ impl Palette {
     pub fn colors_tuples(&self) -> &[(u8, u8, u8)] {
         unsafe { std::mem::transmute(self.colors.as_slice()) }
     }
-    pub fn map_colors(&self, map: impl Fn(u8)->u8) -> Palette {
-        let colors = self.colors
+
+    pub fn map_colors(&self, map: impl Fn(u8) -> u8) -> Palette {
+        let colors = self
+            .colors
             .iter()
-            .map(|color| {
-                Color {
-                    red: map(color.red),
-                    green: map(color.green),
-                    blue: map(color.blue),
-                }
+            .map(|color| Color {
+                red: map(color.red),
+                green: map(color.green),
+                blue: map(color.blue),
             })
             .collect();
         Palette { colors }
     }
+
     pub fn colors_multiply(&self, val: u8) -> Palette {
         self.map_colors(|color| color.saturating_mul(val))
     }
+
     pub fn colors_multiply_f32(&self, val: f32) -> Palette {
         self.map_colors(|color| (color as f32 * val).round().clamp(0.0, 255.0) as u8)
     }
@@ -88,7 +90,6 @@ fn parse_color<'a, Error: ParseError<&'a [u8]>>(i: &'a [u8]) -> IResult<&'a [u8]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn test_parse_palette() {

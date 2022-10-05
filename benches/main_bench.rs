@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::time::Duration;
 
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use fo_data::{crawler::gather_paths, datafiles::parse_datafile};
 
 fn bench_gather_paths(c: &mut Criterion) {
@@ -14,9 +14,7 @@ fn bench_gather_paths(c: &mut Criterion) {
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(10));
     {
-        group.bench_function("gather", |b| {
-            b.iter(|| gather_paths(black_box(&archives)))
-        });
+        group.bench_function("gather", |b| b.iter(|| gather_paths(black_box(&archives))));
     }
     /*{
         let modoc_lands_town_dn_path = "../../FO4RP/maps/modoc_lands_town_dn.fomap";

@@ -2,8 +2,9 @@ pub mod fo;
 #[cfg(feature = "sled-retriever")]
 pub mod sled;
 
-use crate::FileType;
 use std::path::Path;
+
+use crate::FileType;
 
 pub trait Retriever {
     type Error;

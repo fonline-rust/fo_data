@@ -4,22 +4,22 @@ pub mod crawler;
 pub mod datafiles;
 pub mod fofrm;
 pub mod frm;
-mod palette;
+pub mod palette;
 mod retriever;
 
+use std::{collections::BTreeMap, path::Path, sync::Arc};
+
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, sync::Arc};
-use std::path::Path;
 pub type PathMap<K, V> = BTreeMap<K, V>;
 pub type ChangeTime = std::time::SystemTime;
-pub use crate::{
-    converter::{Converter, GetImageError, RawImage},
-    retriever::{fo::FoRetriever, Retriever},
-    palette::Palette,
-};
-
 #[cfg(feature = "sled-retriever")]
 pub use retriever::sled::SledRetriever;
+
+pub use crate::{
+    converter::{Converter, GetImageError, RawImage},
+    palette::Palette,
+    retriever::{fo::FoRetriever, Retriever},
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum FileLocation {
@@ -104,8 +104,8 @@ impl FoData {
 
         let palette = palette::load_palette(palette_path).map_err(DataInitError::LoadPalette)?;
         let palette = palette.colors_multiply(4);
-        
-        Ok(Self{retriever, palette})
+
+        Ok(Self { retriever, palette })
     }
 }
 impl<R> FoData<R> {
@@ -133,6 +133,7 @@ impl FoRegistry {
             //palette: Default::default(),
         }
     }
+
     fn recover_from_cache<P: AsRef<Path>>(client_root: P) -> Result<Self, DataInitError> {
         type Error = DataInitError;
         let cache_file = std::fs::File::open(CACHE_PATH).map_err(Error::CacheIO)?;
@@ -142,7 +143,8 @@ impl FoRegistry {
             .modified()
             .map_err(Error::CacheIO)?;
         let reader = std::io::BufReader::new(cache_file);
-        let fo_data: FoRegistry = bincode::deserialize_from(reader).map_err(Error::CacheDeserialize)?;
+        let fo_data: FoRegistry =
+            bincode::deserialize_from(reader).map_err(Error::CacheDeserialize)?;
         let datafiles_changetime =
             datafiles::datafiles_changetime(client_root).map_err(Error::Datafiles)?;
         let cache_changed = cache_changed.min(fo_data.changed);
@@ -156,9 +158,8 @@ impl FoRegistry {
         }
         Ok(fo_data)
     }
-    pub fn init(
-        client_root: impl AsRef<Path>,
-    ) -> Result<Self, DataInitError> {
+
+    pub fn init(client_root: impl AsRef<Path>) -> Result<Self, DataInitError> {
         type Error = DataInitError;
         match Self::recover_from_cache(&client_root) {
             Err(err) => println!("FoData recovery failed: {:?}", err),
@@ -181,15 +182,19 @@ impl FoRegistry {
         }
         Ok(fo_data)
     }
+
     pub fn count_archives(&self) -> usize {
         self.archives.len()
     }
+
     pub fn count_files(&self) -> usize {
         self.files.len()
     }
+
     pub fn into_retriever(self) -> FoRetriever {
         FoRetriever::new(Arc::new(self))
     }
+
     pub fn files(&self) -> impl ExactSizeIterator<Item = (&str, &FileInfo)> {
         self.files.iter().map(|(path, info)| (path.as_str(), info))
     }
@@ -215,7 +220,9 @@ mod test_stuff {
 
     #[cfg(not(feature = "sled-retriever"))]
     pub fn test_retriever() -> crate::FoRetriever {
-        crate::FoRegistry::init(CLIENT_FOLDER).unwrap().into_retriever()
+        crate::FoRegistry::init(CLIENT_FOLDER)
+            .unwrap()
+            .into_retriever()
     }
 
     #[cfg(feature = "sled-retriever")]
@@ -231,8 +238,9 @@ use test_stuff::*;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
+
+    use super::*;
 
     #[test]
     fn load_frm_from_zip_and_convert_to_png() {

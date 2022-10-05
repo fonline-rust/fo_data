@@ -35,18 +35,19 @@ pub struct Converter<'r, 'p, R> {
 }
 impl<'r, 'p, R> Converter<'r, 'p, R> {
     pub fn new(retriever: &'r R, palette: &'p Palette) -> Self {
-        Self{retriever, palette}
+        Self { retriever, palette }
     }
 }
 
 impl<'r, 'p, R: Retriever> Converter<'r, 'p, R>
 where
-    R::Error: Into<GetImageError>
+    R::Error: Into<GetImageError>,
 {
     pub fn get_png(&self, path: &str) -> Result<FileData, GetImageError> {
         let raw = get_raw(self.retriever, path, 0, Some(self.palette.colors_tuples()))?;
         raw.to_png().map_err(GetImageError::ImageWrite)
     }
+
     pub fn get_rgba(&self, path: &str) -> Result<RawImage, GetImageError> {
         get_raw(self.retriever, path, 0, Some(self.palette.colors_tuples()))
     }

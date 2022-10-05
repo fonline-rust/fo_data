@@ -20,6 +20,7 @@ impl<'a> FoFrmRaw<'a> {
             Err(FoFrmErrorKind::UnexpectedToken)
         }
     }
+
     fn end_direction(&mut self) -> Result<(), FoFrmErrorKind> {
         if let Some(direction) = self.directions.last_mut() {
             direction.end_frame()?;
@@ -39,14 +40,16 @@ impl<'a> FoFrmRaw<'a> {
         }
         Ok(())
     }
+
     fn new_direction(&mut self, dir: u8) -> Result<(), FoFrmErrorKind> {
         if self.directions.len() != dir as usize {
             return Err(FoFrmErrorKind::WrongDirOrder(self.directions.len(), dir));
         }
-        self.end_direction();
+        self.end_direction()?;
         self.directions.push(Default::default());
         Ok(())
     }
+
     fn last_direction(&mut self) -> &mut Direction<'a> {
         if self.directions.is_empty() {
             self.directions.push(Default::default());
@@ -74,11 +77,13 @@ impl<'a> Direction<'a> {
         }
         Ok(())
     }
+
     fn new_frame(&mut self) -> Result<&mut Frame<'a>, FoFrmErrorKind> {
         self.end_frame()?;
         self.frames.push(Default::default());
         Ok(self.frames.last_mut().unwrap())
     }
+
     fn get_frame(&mut self, frame: u16) -> Result<&mut Frame<'a>, FoFrmErrorKind> {
         let len: u16 = self.frames.len() as u16;
         if len > frame + 1 {
@@ -249,26 +254,30 @@ mod test {
     use super::*;
     #[test]
     fn test_raw_simple() {
-        dbg!(parse_verbose(
-            "\
+        dbg!(
+            parse_verbose(
+                "\
             offs_x=0\n\
             offs_y=5\n\
             frm=radcvetg.png\n\
         "
-        )
-        .unwrap());
+            )
+            .unwrap()
+        );
     }
     #[test]
     fn test_offset_reverse() {
-        dbg!(parse_verbose(
-            "\
+        dbg!(
+            parse_verbose(
+                "\
         frm=manufact_ammo1.png\n\
         \n\
         offs_x=22\n\
         offs_y=10\n\
         "
-        )
-        .unwrap());
+            )
+            .unwrap()
+        );
     }
 
     #[test]

@@ -1,9 +1,9 @@
 //use array_macro::array;
 use debug_helper::impl_debug_for_struct;
-use nom::error::context;
 use nom::{
     bytes::complete::take,
     combinator::{cut, verify},
+    error::context,
     number::complete::{be_i16, be_u16, be_u32},
 };
 use nom_prelude::*;

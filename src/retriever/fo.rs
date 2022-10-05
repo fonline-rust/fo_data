@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use crate::{FileData, FileLocation, FoRegistry};
 use parking_lot::{MappedMutexGuard as Guard, Mutex, MutexGuard};
+
+use crate::{FileLocation, FoRegistry};
 
 #[derive(Debug)]
 pub enum Error {
@@ -26,6 +27,7 @@ impl FoRetriever {
         archives.resize_with(data.archives.len(), Default::default);
         Self { archives, data }
     }
+
     fn get_archive(&self, archive_index: usize) -> Result<Guard<Archive>, Error> {
         use std::io::BufReader;
 
@@ -46,9 +48,11 @@ impl FoRetriever {
             &mut **option.as_mut().expect("Should be some")
         }))
     }
+
     pub fn registry(&self) -> &Arc<FoRegistry> {
         &self.data
     }
+
     pub fn file_by_info(&self, file_info: &crate::FileInfo) -> Result<bytes::Bytes, Error> {
         use std::io::Read;
 
@@ -70,6 +74,7 @@ impl FoRetriever {
 
 impl super::Retriever for FoRetriever {
     type Error = Error;
+
     fn file_by_path(&self, path: &str) -> Result<bytes::Bytes, Self::Error> {
         let file_info = self.data.files.get(path).ok_or(Error::NotFound)?;
 

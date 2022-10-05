@@ -1,6 +1,6 @@
+use std::{io::BufReader, path::Path};
+
 use crate::{FileInfo, FileLocation, PathMap};
-use std::io::BufReader;
-use std::path::Path;
 
 #[derive(Debug)]
 pub enum Error {}

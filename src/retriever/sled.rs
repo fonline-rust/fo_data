@@ -23,6 +23,7 @@ impl SledRetriever {
         let (_, palette) = crate::palette::palette_verbose(&file).unwrap();
         SledRetriever::with_pallete(db, palette.colors_multiply(4))
     }
+
     pub fn with_pallete<P: AsRef<Path>>(path: P, palette: Vec<(u8, u8, u8)>) -> Result<Self> {
         let config = sled::Config::new()
             .path(path)
@@ -43,6 +44,7 @@ impl SledRetriever {
 
 impl super::Retriever for SledRetriever {
     type Error = Error;
+
     fn file_by_path(&self, path: &str) -> Result<bytes::Bytes, Self::Error> {
         let index = self
             .paths
