@@ -1,16 +1,23 @@
-use std::sync::Arc;
+use std::{sync::Arc, path::PathBuf};
 
 use parking_lot::{MappedMutexGuard as Guard, Mutex, MutexGuard};
+use thiserror::Error;
 
-use crate::{FileLocation, FoRegistry};
+use crate::{FileLocation, FoRegistry, PathError};
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("path not found")]
     NotFound,
+    #[error("invalid archive index")]
     InvalidArchiveIndex,
-    OpenArchive(std::io::Error),
+    #[error("can't open archve: {0}")]
+    OpenArchive(PathBuf, std::io::Error),
+    #[error("zip err: {0}")]
     Zip(zip::result::ZipError),
+    #[error("unsupporte file location")]
     UnsupportedFileLocation,
+    #[error("archive io error: {0}")]
     ArchiveRead(std::io::Error),
 }
 
@@ -39,7 +46,7 @@ impl FoRetriever {
                 .archives
                 .get(archive_index)
                 .ok_or(Error::InvalidArchiveIndex)?;
-            let archive_file = std::fs::File::open(&archive.path).map_err(Error::OpenArchive)?;
+            let archive_file = std::fs::File::open(&archive.path).path_err(&archive.path, Error::OpenArchive)?;
             let archive_buf_reader = BufReader::with_capacity(1024, archive_file);
             let archive = zip::ZipArchive::new(archive_buf_reader).map_err(Error::Zip)?;
             *guard = Some(Box::new(archive));
@@ -53,7 +60,7 @@ impl FoRetriever {
         &self.data
     }
 
-    pub fn file_by_info(&self, file_info: &crate::FileInfo) -> Result<bytes::Bytes, Error> {
+    pub fn file_by_info(&self, file_info: &crate::FileInfo) -> Result<Vec<u8>, Error> {
         use std::io::Read;
 
         match file_info.location {
@@ -65,7 +72,7 @@ impl FoRetriever {
                     .map_err(Error::Zip)?;
                 let mut buffer = Vec::with_capacity(file.size() as usize);
                 file.read_to_end(&mut buffer).map_err(Error::ArchiveRead)?;
-                Ok(buffer.into())
+                Ok(buffer)
             }
             _ => Err(Error::UnsupportedFileLocation),
         }
@@ -75,8 +82,8 @@ impl FoRetriever {
 impl super::Retriever for FoRetriever {
     type Error = Error;
 
-    fn file_by_path(&self, path: &str) -> Result<bytes::Bytes, Self::Error> {
-        let file_info = self.data.files.get(path).ok_or(Error::NotFound)?;
+    fn file_by_path(&self, path: &str) -> Result<Vec<u8>, Self::Error> {
+        let file_info = self.data.file_info(path).ok_or(Error::NotFound)?;
 
         self.file_by_info(&file_info)
     }

@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use nom_prelude::{complete::*, *};
 
+use crate::PathError;
+
 const DATAFILES_CFG: &str = "DataFiles.cfg";
 
 #[derive(Debug)]
@@ -11,17 +13,6 @@ pub enum Error {
     Metadata(PathBuf, std::io::Error),
     //Nom(nom::Err<(String, nom::error::ErrorKind)>),
     Nom(nom::Err<String>),
-}
-trait PathError<T, E>: Sized {
-    fn path_err<E2>(self, path: &Path, fun: fn(PathBuf, E) -> E2) -> Result<T, E2>;
-}
-impl<T, E> PathError<T, E> for Result<T, E> {
-    fn path_err<E2>(self, path: &Path, fun: fn(PathBuf, E) -> E2) -> Result<T, E2> {
-        match self {
-            Ok(ok) => Ok(ok),
-            Err(err) => Err(fun(path.into(), err)),
-        }
-    }
 }
 
 fn datafile_path(parent_folder: &Path) -> Result<PathBuf, Error> {

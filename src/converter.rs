@@ -99,7 +99,7 @@ where
 
             let dynamic = image::load_from_memory_with_format(slice, image::ImageFormat::Png)
                 .map_err(GetImageError::PngDecode)?;
-            let mut image = dynamic.into_rgba();
+            let mut image = dynamic.into_rgba8();
             let (width, height) = image.dimensions();
 
             image.pixels_mut().for_each(|pixel| {

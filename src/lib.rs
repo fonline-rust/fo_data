@@ -5,9 +5,9 @@ pub mod datafiles;
 pub mod fofrm;
 pub mod frm;
 pub mod palette;
-mod retriever;
+pub mod retriever;
 
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, path::{Path, PathBuf}, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 pub type PathMap<K, V> = BTreeMap<K, V>;
@@ -197,6 +197,36 @@ impl FoRegistry {
 
     pub fn files(&self) -> impl ExactSizeIterator<Item = (&str, &FileInfo)> {
         self.files.iter().map(|(path, info)| (path.as_str(), info))
+    }
+
+    pub fn file_info(&self, path: &str) -> Option<&FileInfo> {
+        self.files.get(path)
+    }
+}
+
+trait PathError<T, E>: Sized {
+    fn path_err<E2>(self, path: &Path, fun: fn(PathBuf, E) -> E2) -> Result<T, E2>;
+    fn paths_err<E2>(self, path1: &Path, path2: &Path, fun: fn(PathBuf, PathBuf, E) -> E2) -> Result<T, E2>;
+    fn just_path<E2>(self, path: &Path, fun: fn(PathBuf) -> E2) -> Result<T, E2>;
+}
+impl<T, E> PathError<T, E> for Result<T, E> {
+    fn path_err<E2>(self, path: &Path, fun: fn(PathBuf, E) -> E2) -> Result<T, E2> {
+        match self {
+            Ok(ok) => Ok(ok),
+            Err(err) => Err(fun(path.into(), err)),
+        }
+    }
+    fn paths_err<E2>(self, path1: &Path, path2: &Path, fun: fn(PathBuf, PathBuf, E) -> E2) -> Result<T, E2> {
+        match self {
+            Ok(ok) => Ok(ok),
+            Err(err) => Err(fun(path1.into(), path2.into(), err)),
+        }
+    }
+    fn just_path<E2>(self, path: &Path, fun: fn(PathBuf) -> E2) -> Result<T, E2> {
+        match self {
+            Ok(ok) => Ok(ok),
+            Err(_err) => Err(fun(path.into())),
+        }
     }
 }
 
