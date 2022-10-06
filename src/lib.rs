@@ -119,6 +119,7 @@ pub struct FoRegistry {
     changed: ChangeTime,
     archives: Vec<FoArchive>,
     files: PathMap<String, FileInfo>,
+    dirs: Dirs,
     //cache: HashMap<(String, OutputType), FileData>,
     //palette: Palette,
 }
@@ -130,6 +131,7 @@ impl FoRegistry {
             changed: ChangeTime::now(),
             archives: Default::default(),
             files: Default::default(),
+            dirs: Default::default(),
             //palette: Default::default(),
         }
     }
@@ -158,6 +160,33 @@ impl FoRegistry {
         }
         Ok(fo_data)
     }
+    /*
+    fn cut_paths<V>(map: &PathMap<String, V>) -> PathMap<String, ()> {
+        map.keys().filter_map(|path| Some((path.rsplit_once('/')?.0.to_owned(), ()))).collect()
+    }
+
+    
+    fn compute_dirs<V>(files: &PathMap<String, V>) -> PathMap<String, DirEntry> {
+        let dir = Self::cut_paths(&files);
+        if dir.is_empty() {
+            return Default::default();
+        }
+
+        let mut dirs_vec = vec![dir];
+        loop {
+            let dir = Self::cut_paths(dirs_vec.last().unwrap());
+            if dir.is_empty() {
+                break;
+            }
+            dirs_vec.push(dir);
+        }
+        let mut result = dirs_vec.swap_remove(0);
+        for mut dir in dirs_vec {
+            result.append(&mut dir);
+        }
+        result
+    }
+    */
 
     pub fn init(client_root: impl AsRef<Path>) -> Result<Self, DataInitError> {
         type Error = DataInitError;
@@ -168,11 +197,17 @@ impl FoRegistry {
 
         let archives = datafiles::parse_datafile(client_root).map_err(Error::Datafiles)?;
         let files = crawler::gather_paths(&archives).map_err(Error::GatherPaths)?;
+        let mut dirs = Dirs::default();
+        for (path, _) in &files {
+            dirs.register(path, FoMetadata::File);
+        }
+
         let changed = ChangeTime::now();
         let fo_data = FoRegistry {
             changed,
             archives,
             files,
+            dirs,
             //palette,
         };
         {
@@ -202,6 +237,73 @@ impl FoRegistry {
     pub fn file_info(&self, path: &str) -> Option<&FileInfo> {
         self.files.get(path)
     }
+
+    fn is_dir(&self, path: &str) -> bool {
+        path.is_empty() || self.dirs.map.get(path.trim_end_matches('/')).is_some()
+    }
+
+    pub fn metadata(&self, path: &str) -> Option<FoMetadata> {
+        if let Some(_file_info) = self.file_info(path) {
+            Some(FoMetadata::File)
+        } else if self.is_dir(path) {
+            Some(FoMetadata::Dir)
+        } else {
+            None
+        }
+    }
+
+    pub fn file_location(&self, path: &str) -> Option<&Path> {
+        self.file_info(path)?.location(self).map(AsRef::as_ref)
+    }
+    /*
+    fn walk_path<'a, V>(map: &'a PathMap<String, V>, path: &'a str) -> impl 'a + Iterator<Item = &'a str> {
+        map.range::<str, _>((Bound::Excluded(path), Bound::Unbounded)).map_while(move |(key, _value)| {
+            Some((key.as_str().strip_prefix(path)?, key.as_str()))
+        }).filter_map(|(rel, absolute)| {
+            if rel.trim_start_matches('/').contains('/') {
+                println!("rel: {rel}, abs: {absolute}, None");
+                None
+            } else {
+                println!("rel: {rel}, abs: {absolute}, Good");
+                Some(absolute)
+            }
+        })
+    }
+    */
+
+    pub fn ls_dir<'a>(&'a self, path: &'a str) -> Option<impl 'a + Iterator<Item = &'a str>> {
+        Some(self.dirs.map.get(path.trim_end_matches('/'))?.iter().map(|(entry, _)| entry.as_str()))
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Dirs {
+    map: PathMap<String, PathMap<String, FoMetadata>>,
+}
+
+impl Dirs {
+    fn parent(path: &str) -> &str {
+        path.trim_end_matches('/').rsplit_once('/').unwrap_or(("", &path)).0
+    }
+    fn register(&mut self, path: &str, metadata: FoMetadata) {
+        let parent = Self::parent(path);
+
+        let entries = self.map.entry(parent.to_owned()).or_default();
+        if entries.contains_key(path) {
+            return;
+        }
+        entries.insert(path.to_owned(), metadata);
+
+        if !parent.is_empty() {
+            self.register(parent, FoMetadata::Dir);
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum FoMetadata {
+    File,
+    Dir,
 }
 
 trait PathError<T, E>: Sized {

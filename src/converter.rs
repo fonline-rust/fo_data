@@ -1,3 +1,5 @@
+use std::io::Cursor;
+
 use crate::*;
 
 #[derive(Debug)]
@@ -65,11 +67,12 @@ impl RawImage {
         let dimensions = self.image.dimensions();
         let size = (dimensions.0 as usize * dimensions.1 as usize * 4 + 512).next_power_of_two();
         let image = image::DynamicImage::ImageRgba8(self.image);
-        let mut data = Vec::with_capacity(size);
+        let data = Vec::with_capacity(size);
+        let mut cursor = Cursor::new(data);
 
-        image.write_to(&mut data, image::ImageFormat::Png)?;
+        image.write_to(&mut cursor, image::ImageFormat::Png)?;
         Ok(FileData {
-            data: data.into(),
+            data: cursor.into_inner().into(),
             data_type: DataType::Png,
             dimensions,
             offset: (self.offset_x, self.offset_y),

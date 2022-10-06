@@ -10,6 +10,8 @@ use nom_prelude::*;
 
 pub type Arr6<V> = ArrayVec<[V; 6]>;
 
+pub type FrmParseError = ErrorKind;
+
 #[derive(Debug)]
 pub struct Frm<'a> {
     pub version: u32,
@@ -25,7 +27,7 @@ pub fn frm_verbose<'a>(
     Ok((rest, frm))
 }
 
-pub fn frm<'a>(buf: &'a [u8]) -> Result<Frm<'a>, ErrorKind> {
+pub fn frm<'a>(buf: &'a [u8]) -> Result<Frm<'a>, FrmParseError> {
     err_to_kind(parse_frm(buf))
 }
 
