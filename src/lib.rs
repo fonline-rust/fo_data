@@ -5,9 +5,15 @@ pub mod datafiles;
 pub mod fofrm;
 pub mod frm;
 pub mod palette;
+mod registry_cache;
 pub mod retriever;
 
-use std::{collections::BTreeMap, path::{Path, PathBuf}, sync::Arc};
+use std::{
+    collections::{hash_map::DefaultHasher, BTreeMap},
+    hash::Hasher,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use serde::{Deserialize, Serialize};
 pub type PathMap<K, V> = BTreeMap<K, V>;
@@ -20,37 +26,79 @@ pub use crate::{
     palette::Palette,
     retriever::{fo::FoRetriever, Retriever},
 };
+use crate::{crawler::Files, registry_cache::FoRegistryCache};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum FileLocation {
-    Archive(u16),
-    Local,
-}
-impl Default for FileLocation {
-    fn default() -> Self {
-        FileLocation::Local
-    }
+    Archive {
+        index: u16,
+        original_path: String,
+        compressed_size: u64,
+    },
+    Local {
+        original_path: PathBuf,
+    },
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileInfo {
     location: FileLocation,
-    original_path: String,
-    compressed_size: u64,
+    conventional_path: String,
 }
+
 impl FileInfo {
-    pub fn location<'a>(&self, data: &'a FoRegistry) -> Option<&'a std::path::PathBuf> {
-        match self.location {
-            FileLocation::Archive(index) => data
+    pub fn new_in_archive(
+        conventional_path: String,
+        archive_index: u16,
+        original_path: String,
+        compressed_size: u64,
+    ) -> Self {
+        FileInfo {
+            location: FileLocation::Archive {
+                index: archive_index,
+                original_path,
+                compressed_size,
+            },
+            conventional_path,
+        }
+    }
+
+    pub fn new_local(conventional_path: String, original_path: PathBuf) -> Self {
+        FileInfo {
+            location: FileLocation::Local { original_path },
+            conventional_path,
+        }
+    }
+
+    pub fn location<'a>(&'a self, data: &'a FoRegistry) -> Option<&'a std::path::PathBuf> {
+        match &self.location {
+            &FileLocation::Archive { index, .. } => data
                 .archives
                 .get(index as usize)
                 .map(|archive| &archive.path),
-            _ => None,
+            FileLocation::Local { original_path } => Some(original_path),
         }
+    }
+
+    pub fn hash(&self) -> u32 {
+        hash(self.conventional_path.as_bytes())
+    }
+
+    pub fn conventional_path(&self) -> &str {
+        &self.conventional_path
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+pub fn conventional_hash(path: &str) -> u32 {
+    let conventional_path = nom_prelude::make_path_conventional(path);
+    hash(conventional_path.as_bytes())
+}
+
+pub fn hash(bytes: &[u8]) -> u32 {
+    crc32fast::hash(bytes)
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct FoArchive {
     changed: ChangeTime,
     path: std::path::PathBuf,
@@ -87,7 +135,9 @@ pub enum DataInitError {
     CacheSerialize(bincode::Error),
     CacheDeserialize(bincode::Error),
     CacheIO(std::io::Error),
+    DataFolderMissing,
     CacheStale,
+    CacheIncompatible,
 }
 
 pub struct FoData<R = FoRetriever> {
@@ -115,29 +165,67 @@ impl<R> FoData<R> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FoRegistry {
+struct CacheMetadata {
     changed: ChangeTime,
-    archives: Vec<FoArchive>,
-    files: PathMap<String, FileInfo>,
-    dirs: Dirs,
-    //cache: HashMap<(String, OutputType), FileData>,
-    //palette: Palette,
+    local_paths_len: u32,
+    local_paths_hash: u64,
 }
 
-const CACHE_PATH: &str = "fo_data.bin";
-impl FoRegistry {
-    pub fn stub() -> Self {
-        FoRegistry {
-            changed: ChangeTime::now(),
-            archives: Default::default(),
-            files: Default::default(),
-            dirs: Default::default(),
-            //palette: Default::default(),
+impl CacheMetadata {
+    fn new(local_paths: impl ExactSizeIterator<Item = u32>) -> Self {
+        let local_paths_len = local_paths.len() as u32;
+
+        let mut hasher = DefaultHasher::new();
+        for hash in local_paths {
+            hasher.write_u32(hash);
+        }
+        let local_paths_hash = hasher.finish();
+        Self {
+            local_paths_len,
+            local_paths_hash,
+            ..Default::default()
         }
     }
+}
 
-    fn recover_from_cache<P: AsRef<Path>>(client_root: P) -> Result<Self, DataInitError> {
+impl Default for CacheMetadata {
+    fn default() -> Self {
+        Self {
+            changed: ChangeTime::now(),
+            local_paths_len: 0,
+            local_paths_hash: 0,
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct FoRegistry {
+    cache_metadata: CacheMetadata,
+    archives: Vec<FoArchive>,
+    files: Files,
+    dirs: Dirs,
+}
+
+pub type FoRegistryArc = Arc<FoRegistry>;
+
+const CACHE_PATH: &str = "fo_data.bin";
+const DATA_PATH: &str = "data";
+
+impl FoRegistry {
+    fn version() -> u32 {
+        1
+    }
+
+    pub fn stub() -> Self {
+        FoRegistry::default()
+    }
+
+    fn recover_from_cache<P: AsRef<Path>>(
+        client_root: P,
+        new_cache_metadata: &CacheMetadata,
+    ) -> Result<Self, DataInitError> {
         type Error = DataInitError;
+
         let cache_file = std::fs::File::open(CACHE_PATH).map_err(Error::CacheIO)?;
         let cache_changed = cache_file
             .metadata()
@@ -145,66 +233,78 @@ impl FoRegistry {
             .modified()
             .map_err(Error::CacheIO)?;
         let reader = std::io::BufReader::new(cache_file);
-        let fo_data: FoRegistry =
+        let cache: FoRegistryCache<_> =
             bincode::deserialize_from(reader).map_err(Error::CacheDeserialize)?;
+        let data: FoRegistry = cache.into_data()?;
+
         let datafiles_changetime =
             datafiles::datafiles_changetime(client_root).map_err(Error::Datafiles)?;
-        let cache_changed = cache_changed.min(fo_data.changed);
+
+        let cache_changed = cache_changed.min(data.cache_metadata.changed);
         if datafiles_changetime > cache_changed {
             return Err(Error::CacheStale);
         }
-        for archive in &fo_data.archives {
+
+        if new_cache_metadata.local_paths_len != data.cache_metadata.local_paths_len
+            || new_cache_metadata.local_paths_hash != data.cache_metadata.local_paths_hash
+        {
+            return Err(Error::CacheStale);
+        }
+
+        // TODO: gather new change times instead
+        for archive in &data.archives {
             if archive.changed > cache_changed {
                 return Err(Error::CacheStale);
             }
         }
-        Ok(fo_data)
-    }
-    /*
-    fn cut_paths<V>(map: &PathMap<String, V>) -> PathMap<String, ()> {
-        map.keys().filter_map(|path| Some((path.rsplit_once('/')?.0.to_owned(), ()))).collect()
-    }
 
-    
-    fn compute_dirs<V>(files: &PathMap<String, V>) -> PathMap<String, DirEntry> {
-        let dir = Self::cut_paths(&files);
-        if dir.is_empty() {
-            return Default::default();
-        }
-
-        let mut dirs_vec = vec![dir];
-        loop {
-            let dir = Self::cut_paths(dirs_vec.last().unwrap());
-            if dir.is_empty() {
-                break;
-            }
-            dirs_vec.push(dir);
-        }
-        let mut result = dirs_vec.swap_remove(0);
-        for mut dir in dirs_vec {
-            result.append(&mut dir);
-        }
-        result
+        Ok(data)
     }
-    */
 
     pub fn init(client_root: impl AsRef<Path>) -> Result<Self, DataInitError> {
         type Error = DataInitError;
-        match Self::recover_from_cache(&client_root) {
+
+        let local_paths = crawler::gather_local_paths(
+            client_root
+                .as_ref()
+                .join(DATA_PATH)
+                .canonicalize()
+                .map_err(|_| Error::DataFolderMissing)?,
+        );
+
+        let cache_metadata = CacheMetadata::new(local_paths.iter().map(|(hash, _)| *hash));
+
+        match Self::recover_from_cache(&client_root, &cache_metadata) {
             Err(err) => println!("FoData recovery failed: {:?}", err),
             ok => return ok,
         }
 
         let archives = datafiles::parse_datafile(client_root).map_err(Error::Datafiles)?;
-        let files = crawler::gather_paths(&archives).map_err(Error::GatherPaths)?;
+
+        let paths_in_archives = crawler::gather_paths_in_archives(&archives);
+
+        let mut files = Files::default();
+        files
+            .reconcile_paths(paths_in_archives.into_iter().flatten(), |_, _| Ok(()))
+            .map_err(Error::GatherPaths)?;
+
+        files
+            .reconcile_paths(local_paths.into_iter(), |old, new| match &old.location {
+                FileLocation::Local { .. } => Err(crawler::Error::LocalRewrite {
+                    old: old.clone(),
+                    new: new.clone(),
+                }),
+                _ => Ok(()),
+            })
+            .map_err(Error::GatherPaths)?;
+
         let mut dirs = Dirs::default();
-        for (path, _) in &files {
+        for path in files.paths() {
             dirs.register(path, FoMetadata::File);
         }
 
-        let changed = ChangeTime::now();
         let fo_data = FoRegistry {
-            changed,
+            cache_metadata,
             archives,
             files,
             dirs,
@@ -213,7 +313,8 @@ impl FoRegistry {
         {
             let cache_file = std::fs::File::create(CACHE_PATH).map_err(Error::CacheIO)?;
             let mut writer = std::io::BufWriter::new(cache_file);
-            bincode::serialize_into(&mut writer, &fo_data).map_err(Error::CacheSerialize)?;
+            let cache = FoRegistryCache::new(&fo_data);
+            bincode::serialize_into(&mut writer, &cache).map_err(Error::CacheSerialize)?;
         }
         Ok(fo_data)
     }
@@ -222,20 +323,12 @@ impl FoRegistry {
         self.archives.len()
     }
 
-    pub fn count_files(&self) -> usize {
-        self.files.len()
-    }
-
     pub fn into_retriever(self) -> FoRetriever {
         FoRetriever::new(Arc::new(self))
     }
 
-    pub fn files(&self) -> impl ExactSizeIterator<Item = (&str, &FileInfo)> {
-        self.files.iter().map(|(path, info)| (path.as_str(), info))
-    }
-
-    pub fn file_info(&self, path: &str) -> Option<&FileInfo> {
-        self.files.get(path)
+    pub fn files(&self) -> &Files {
+        &self.files
     }
 
     fn is_dir(&self, path: &str) -> bool {
@@ -243,7 +336,7 @@ impl FoRegistry {
     }
 
     pub fn metadata(&self, path: &str) -> Option<FoMetadata> {
-        if let Some(_file_info) = self.file_info(path) {
+        if let Some(_file_info) = self.files.file_info(path) {
             Some(FoMetadata::File)
         } else if self.is_dir(path) {
             Some(FoMetadata::Dir)
@@ -253,26 +346,20 @@ impl FoRegistry {
     }
 
     pub fn file_location(&self, path: &str) -> Option<&Path> {
-        self.file_info(path)?.location(self).map(AsRef::as_ref)
+        self.files
+            .file_info(path)?
+            .location(self)
+            .map(AsRef::as_ref)
     }
-    /*
-    fn walk_path<'a, V>(map: &'a PathMap<String, V>, path: &'a str) -> impl 'a + Iterator<Item = &'a str> {
-        map.range::<str, _>((Bound::Excluded(path), Bound::Unbounded)).map_while(move |(key, _value)| {
-            Some((key.as_str().strip_prefix(path)?, key.as_str()))
-        }).filter_map(|(rel, absolute)| {
-            if rel.trim_start_matches('/').contains('/') {
-                println!("rel: {rel}, abs: {absolute}, None");
-                None
-            } else {
-                println!("rel: {rel}, abs: {absolute}, Good");
-                Some(absolute)
-            }
-        })
-    }
-    */
 
     pub fn ls_dir<'a>(&'a self, path: &'a str) -> Option<impl 'a + Iterator<Item = &'a str>> {
-        Some(self.dirs.map.get(path.trim_end_matches('/'))?.iter().map(|(entry, _)| entry.as_str()))
+        Some(
+            self.dirs
+                .map
+                .get(path.trim_end_matches('/'))?
+                .iter()
+                .map(|(entry, _)| entry.as_str()),
+        )
     }
 }
 
@@ -283,8 +370,12 @@ struct Dirs {
 
 impl Dirs {
     fn parent(path: &str) -> &str {
-        path.trim_end_matches('/').rsplit_once('/').unwrap_or(("", &path)).0
+        path.trim_end_matches('/')
+            .rsplit_once('/')
+            .unwrap_or(("", &path))
+            .0
     }
+
     fn register(&mut self, path: &str, metadata: FoMetadata) {
         let parent = Self::parent(path);
 
@@ -308,7 +399,12 @@ pub enum FoMetadata {
 
 trait PathError<T, E>: Sized {
     fn path_err<E2>(self, path: &Path, fun: fn(PathBuf, E) -> E2) -> Result<T, E2>;
-    fn paths_err<E2>(self, path1: &Path, path2: &Path, fun: fn(PathBuf, PathBuf, E) -> E2) -> Result<T, E2>;
+    fn paths_err<E2>(
+        self,
+        path1: &Path,
+        path2: &Path,
+        fun: fn(PathBuf, PathBuf, E) -> E2,
+    ) -> Result<T, E2>;
     fn just_path<E2>(self, path: &Path, fun: fn(PathBuf) -> E2) -> Result<T, E2>;
 }
 impl<T, E> PathError<T, E> for Result<T, E> {
@@ -318,12 +414,19 @@ impl<T, E> PathError<T, E> for Result<T, E> {
             Err(err) => Err(fun(path.into(), err)),
         }
     }
-    fn paths_err<E2>(self, path1: &Path, path2: &Path, fun: fn(PathBuf, PathBuf, E) -> E2) -> Result<T, E2> {
+
+    fn paths_err<E2>(
+        self,
+        path1: &Path,
+        path2: &Path,
+        fun: fn(PathBuf, PathBuf, E) -> E2,
+    ) -> Result<T, E2> {
         match self {
             Ok(ok) => Ok(ok),
             Err(err) => Err(fun(path1.into(), path2.into(), err)),
         }
     }
+
     fn just_path<E2>(self, path: &Path, fun: fn(PathBuf) -> E2) -> Result<T, E2> {
         match self {
             Ok(ok) => Ok(ok),

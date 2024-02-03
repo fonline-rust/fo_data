@@ -1,48 +1,143 @@
-use std::{io::BufReader, path::Path};
+use std::{collections::hash_map::Entry, io::BufReader, path::Path};
 
-use crate::{FileInfo, FileLocation, PathMap};
+use nohash_hasher::IntMap;
+use rayon::prelude::IntoParallelRefIterator;
+use serde::{Deserialize, Serialize};
+
+use crate::{FileInfo, FileLocation};
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    Conflict {
+        hash: u32,
+        old: FileInfo,
+        new: FileInfo,
+    },
+    LocalRewrite {
+        old: FileInfo,
+        new: FileInfo,
+    },
+}
 
-pub fn gather_paths(archives: &[crate::FoArchive]) -> Result<PathMap<String, FileInfo>, Error> {
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Files {
+    inner: IntMap<u32, FileInfo>,
+}
+
+impl Files {
+    pub fn get(&self, hash: u32) -> Option<&FileInfo> {
+        self.inner.get(&hash)
+    }
+
+    pub fn paths(&self) -> impl Iterator<Item = &str> {
+        self.inner
+            .values()
+            .map(|info| info.conventional_path.as_str())
+    }
+
+    pub fn infos(&self) -> impl ExactSizeIterator<Item = &FileInfo> {
+        self.inner.values()
+    }
+
+    pub fn file_info(&self, path: &str) -> Option<&FileInfo> {
+        self.inner.get(&crate::hash(path.as_bytes()))
+    }
+
+    pub fn count_files(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn reconcile_paths(
+        &mut self,
+        paths: impl Iterator<Item = (u32, FileInfo)>,
+        mut on_shadow: impl FnMut(&FileInfo, &FileInfo) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        for (hash, file_info) in paths {
+            match self.inner.entry(hash) {
+                Entry::Vacant(entry) => {
+                    entry.insert(file_info);
+                }
+                Entry::Occupied(mut entry) => {
+                    let old = entry.get();
+                    if old.conventional_path != file_info.conventional_path {
+                        return Err(Error::Conflict {
+                            hash,
+                            old: entry.remove(),
+                            new: file_info,
+                        });
+                    } else {
+                        on_shadow(old, &file_info)?;
+                    }
+                    entry.insert(file_info);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[deprecated]
+pub fn gather_paths(archives: &[crate::FoArchive]) -> IntMap<u32, FileInfo> {
+    let paths = gather_paths_in_archives(&archives);
+    let mut files = Files::default();
+    files
+        .reconcile_paths(paths.into_iter().flatten(), |_, _| Ok(()))
+        .unwrap();
+    files.inner
+}
+
+pub fn gather_paths_in_archives(archives: &[crate::FoArchive]) -> Vec<Vec<(u32, FileInfo)>> {
     assert!(archives.len() <= u16::max_value() as usize);
 
-    let mut path_map = PathMap::new();
-
-    /*use rayon::prelude::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
-        ParallelIterator,
-    };*/
-    path_map.extend(
-        archives
-            .iter()
-            .enumerate()
-            .flat_map(|(archive_index, archive)| {
-                println!("Crawling {:?}", archive.path);
-                let archive_file = std::fs::File::open(&archive.path).unwrap();
-                let buf_reader = BufReader::with_capacity(1024, archive_file);
-                let mut archive_zip = zip::ZipArchive::new(buf_reader).unwrap();
-                let mut local_path_map = PathMap::new();
-                for i in 0..archive_zip.len() {
-                    let entry = archive_zip.by_index(i).unwrap();
-                    if entry.is_dir() {
-                        continue;
-                    }
-                    let entry_name = entry.name();
-                    local_path_map.insert(
-                        nom_prelude::make_path_conventional(entry_name),
-                        FileInfo {
-                            location: FileLocation::Archive(archive_index as u16),
-                            original_path: entry_name.to_owned(),
-                            ..Default::default()
-                        },
-                    );
+    use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
+    archives
+        .par_iter()
+        .enumerate()
+        .map(|(archive_index, archive)| {
+            println!("Crawling {:?}", archive.path);
+            let archive_file = std::fs::File::open(&archive.path).unwrap();
+            let buf_reader = BufReader::with_capacity(1024, archive_file);
+            let mut archive_zip = zip::ZipArchive::new(buf_reader).unwrap();
+            let mut vec = Vec::with_capacity(archive_zip.len());
+            for i in 0..archive_zip.len() {
+                let entry = archive_zip.by_index(i).unwrap();
+                if entry.is_dir() {
+                    continue;
                 }
-                local_path_map
-            }),
-    );
-    Ok(path_map)
+                let entry_name = entry.name();
+                let conventional_path = nom_prelude::make_path_conventional(entry_name);
+
+                let file_info = FileInfo::new_in_archive(
+                    conventional_path,
+                    archive_index as u16,
+                    entry_name.to_owned(),
+                    entry.compressed_size(),
+                );
+
+                let hash = file_info.hash();
+                vec.push((hash, file_info));
+            }
+            vec
+        })
+        .collect()
+}
+
+pub fn gather_local_paths(parent: impl AsRef<Path>) -> Vec<(u32, FileInfo)> {
+    walkdir::WalkDir::new(parent.as_ref())
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| {
+            let stripped = e.path().strip_prefix(parent.as_ref()).ok()?;
+            let string = stripped.to_str()?;
+            let conventional_path = nom_prelude::make_path_conventional(string);
+
+            let file_info = FileInfo::new_local(conventional_path, e.into_path());
+            let hash = file_info.hash();
+            Some((hash, file_info))
+        })
+        .collect()
 }
 
 pub fn shadowed_files(
@@ -50,41 +145,35 @@ pub fn shadowed_files(
 ) -> Result<Vec<(String, u64, &Path, &Path)>, Error> {
     assert!(archives.len() <= u16::max_value() as usize);
 
-    let mut path_map = PathMap::new();
     let mut shadowed = Vec::with_capacity(512);
 
-    for (archive_index, archive) in archives.iter().enumerate() {
-        println!("Crawling {:?}", archive.path);
-        let archive_file = std::fs::File::open(&archive.path).unwrap();
-        let buf_reader = BufReader::with_capacity(1024, archive_file);
-        let mut archive = zip::ZipArchive::new(buf_reader).unwrap();
-        for i in 0..archive.len() {
-            let entry = archive.by_index(i).unwrap();
-            if entry.is_dir() {
-                continue;
-            }
-            let entry_name = entry.name();
-            let old = path_map.insert(
-                nom_prelude::make_path_conventional(entry_name),
-                FileInfo {
-                    location: FileLocation::Archive(archive_index as u16),
-                    original_path: entry_name.to_owned(),
-                    compressed_size: entry.compressed_size(),
-                    ..Default::default()
+    let paths = gather_paths_in_archives(archives);
+
+    let mut files = Files::default();
+
+    files.reconcile_paths(paths.into_iter().flatten(), |old, new| {
+        match (&old.location, &new.location) {
+            (
+                &FileLocation::Archive {
+                    index: old_index, ..
                 },
-            );
-            if let Some(old) = old {
-                if let FileLocation::Archive(old_index) = old.location {
-                    shadowed.push((
-                        old.original_path,
-                        old.compressed_size,
-                        archives[old_index as usize].path.as_path(),
-                        archives[archive_index].path.as_path(),
-                    ));
-                }
+                &FileLocation::Archive {
+                    index,
+                    ref original_path,
+                    compressed_size,
+                },
+            ) => {
+                shadowed.push((
+                    original_path.clone(),
+                    compressed_size,
+                    archives[old_index as usize].path.as_path(),
+                    archives[index as usize].path.as_path(),
+                ));
             }
+            _ => {}
         }
-    }
+        Ok(())
+    })?;
     Ok(shadowed)
 }
 
@@ -92,16 +181,20 @@ pub fn shadowed_files(
 mod tests {
     use super::*;
     #[test]
+    #[allow(deprecated)]
     fn test_gather_paths() {
         let archives = crate::datafiles::parse_datafile(crate::CLIENT_FOLDER).unwrap();
-        let res = gather_paths(&archives).unwrap();
-        for (entry_name, info) in &res {
+
+        for (_hash, info) in gather_paths(&archives) {
             match info.location {
-                FileLocation::Local => {
-                    println!("{:?} => local", entry_name);
+                FileLocation::Local { .. } => {
+                    println!("{:?} => local", &info.conventional_path);
                 }
-                FileLocation::Archive(index) => {
-                    println!("{:?} => {:?}", entry_name, &archives[index as usize]);
+                FileLocation::Archive { index, .. } => {
+                    println!(
+                        "{:?} => {:?}",
+                        &info.conventional_path, &archives[index as usize]
+                    );
                 }
             }
         }

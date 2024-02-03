@@ -285,8 +285,10 @@ mod test {
         let registry = crate::FoRegistry::init(crate::CLIENT_FOLDER).unwrap();
         let retriever = registry.into_retriever();
         //let retriever = crate::test_retriever();
-        for (path, file_info) in &retriever.registry().files {
-            if crate::retriever::recognize_type(path) == crate::FileType::FoFrm {
+        for file_info in retriever.registry().files.infos() {
+            if crate::retriever::recognize_type(&file_info.conventional_path)
+                == crate::FileType::FoFrm
+            {
                 let bytes = retriever.file_by_info(file_info).unwrap();
                 let string = std::str::from_utf8(&bytes).unwrap();
                 let fofrm = parse_verbose(string);
@@ -321,7 +323,7 @@ mod test {
                 }
                 println!(
                     "Parsing: '{}' from '{:?}': {:#?}",
-                    file_info.original_path,
+                    file_info.conventional_path,
                     file_info.location(retriever.registry()),
                     fofrm
                 );
