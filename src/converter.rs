@@ -1,12 +1,13 @@
 use std::io::Cursor;
 
+use self::frm::FrmParseError;
 use crate::*;
 
 #[derive(Debug)]
 pub enum GetImageError {
     FileType(FileType),
     Utf8(std::str::Utf8Error),
-    FrmParse(nom_prelude::ErrorKind),
+    FrmParse(FrmParseError),
     FoFrmParse(fofrm::FoFrmError),
     NoParentFolder,
     InvalidRelativePath(String, String),
@@ -47,7 +48,7 @@ where
 {
     pub fn get_png(&self, path: &str) -> Result<FileData, GetImageError> {
         let raw = get_raw(self.retriever, path, 0, Some(self.palette.colors_tuples()))?;
-        raw.to_png().map_err(GetImageError::ImageWrite)
+        raw.into_png().map_err(GetImageError::ImageWrite)
     }
 
     pub fn get_rgba(&self, path: &str) -> Result<RawImage, GetImageError> {
@@ -63,7 +64,7 @@ pub struct RawImage {
 }
 
 impl RawImage {
-    fn to_png(self) -> Result<FileData, image::ImageError> {
+    fn into_png(self) -> Result<FileData, image::ImageError> {
         let dimensions = self.image.dimensions();
         let size = (dimensions.0 as usize * dimensions.1 as usize * 4 + 512).next_power_of_two();
         let image = image::DynamicImage::ImageRgba8(self.image);
@@ -114,7 +115,7 @@ where
             RawImage {
                 image,
                 offset_x: width as i16 / -2,
-                offset_y: height as i16 * -1,
+                offset_y: -(height as i16),
             }
         }
         FileType::Frm => {
@@ -123,7 +124,7 @@ where
             let frm = frm::frm(&data).map_err(GetImageError::FrmParse)?;
             let frame_number = 0;
 
-            let direction = frm.directions.get(0).ok_or(GetImageError::NoDirection)?;
+            let direction = frm.directions.first().ok_or(GetImageError::NoDirection)?;
             let frame = direction
                 .frames
                 .get(frame_number)
@@ -154,10 +155,10 @@ where
             let data = retriever.file_by_path(path).map_err(Into::into)?;
 
             let string = std::str::from_utf8(&data).map_err(GetImageError::Utf8)?;
-            let fofrm = fofrm::parse_verbose(&string).map_err(GetImageError::FoFrmParse)?;
+            let fofrm = fofrm::parse_verbose(string).map_err(GetImageError::FoFrmParse)?;
             let frame_number = 0;
 
-            let direction = fofrm.directions.get(0).ok_or(GetImageError::NoDirection)?;
+            let direction = fofrm.directions.first().ok_or(GetImageError::NoDirection)?;
             let frame = direction
                 .frames
                 .get(frame_number)
@@ -188,7 +189,7 @@ where
                     ));
                 }
             }
-            let full_path = nom_prelude::make_path_conventional(
+            let full_path = fformat_utils::make_path_conventional(
                 full_path
                     .to_str()
                     .expect("Convert full path back to string"),

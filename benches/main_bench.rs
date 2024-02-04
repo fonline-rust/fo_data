@@ -9,7 +9,7 @@ fn bench_gather_paths(c: &mut Criterion) {
     let path = std::path::Path::new("../../../CL4RP")
         .canonicalize()
         .unwrap();
-    let archives = parse_datafile(&path).expect("Parse datafiles");
+    let archives = parse_datafile(path).expect("Parse datafiles");
 
     let mut group = c.benchmark_group("gather_paths");
     group.warm_up_time(Duration::from_secs(5));

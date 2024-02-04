@@ -1,5 +1,10 @@
+use std::cmp::Ordering;
+
 use nom::bytes::complete::tag;
-use nom_prelude::*;
+use nom_prelude::{
+    alt, integer, kv_eq, kv_kv_sep, map, nom, preceded, section_ext, some_text, t_rn,
+    unsigned_number, ArrayVec, IResult, ParseError,
+};
 
 pub type Arr6<V> = ArrayVec<[V; 6]>;
 #[derive(Debug, Default)]
@@ -66,14 +71,11 @@ pub struct Direction<'a> {
 }
 
 impl<'a> Direction<'a> {
-    fn end_frame(&mut self) -> Result<(), FoFrmErrorKind> {
-        match self.frames.last() {
-            Some(frame) => {
-                frame
-                    .frm
-                    .ok_or_else(|| FoFrmErrorKind::FrameWithoutPath(self.frames.len()))?;
+    fn end_frame(&self) -> Result<(), FoFrmErrorKind> {
+        if let Some(frame) = self.frames.last() {
+            if frame.frm.is_none() {
+                return Err(FoFrmErrorKind::FrameWithoutPath(self.frames.len()));
             }
-            None => {}
         }
         Ok(())
     }
@@ -86,12 +88,11 @@ impl<'a> Direction<'a> {
 
     fn get_frame(&mut self, frame: u16) -> Result<&mut Frame<'a>, FoFrmErrorKind> {
         let len: u16 = self.frames.len() as u16;
-        if len > frame + 1 {
-            Err(FoFrmErrorKind::WrongFrameOrder(self.frames.len(), frame))
-        } else if len == frame + 1 {
-            Ok(self.frames.last_mut().unwrap())
-        } else {
-            self.new_frame()
+        let next_frame = frame + 1;
+        match len.cmp(&next_frame) {
+            Ordering::Greater => Err(FoFrmErrorKind::WrongFrameOrder(self.frames.len(), frame)),
+            Ordering::Equal => Ok(self.frames.last_mut().unwrap()),
+            Ordering::Less => self.new_frame(),
         }
     }
 }
@@ -121,7 +122,7 @@ pub enum FoFrmError {
 type VerboseError<'a> = LocalError<'a, nom::error::VerboseError<&'a str>>;
 
 impl<'a> VerboseError<'a> {
-    fn to_owned(self) -> FoFrmError {
+    fn into_owned(self) -> FoFrmError {
         match self {
             LocalError::Nom(i, err) => {
                 FoFrmError::Nom(err.map(|err| nom::error::convert_error(i, err)))
@@ -184,8 +185,8 @@ fn parse_fofrm_raw<'a, Error: ParseError<&'a str>>(
     Ok(fofrm)
 }
 
-pub fn parse_verbose<'a>(input: &'a str) -> Result<FoFrmRaw<'a>, FoFrmError> {
-    parse_fofrm_raw(input).map_err(VerboseError::to_owned)
+pub fn parse_verbose(input: &str) -> Result<FoFrmRaw, FoFrmError> {
+    parse_fofrm_raw(input).map_err(VerboseError::into_owned)
 }
 
 #[derive(Debug)]
@@ -292,34 +293,31 @@ mod test {
                 let bytes = retriever.file_by_info(file_info).unwrap();
                 let string = std::str::from_utf8(&bytes).unwrap();
                 let fofrm = parse_verbose(string);
-                match &fofrm {
-                    Ok(fofrm) => {
-                        if fofrm.effect.is_none()
-                            && fofrm.directions.len() == 1
-                            && !fofrm
-                                .directions
-                                .get(0)
-                                .map(|dir| {
-                                    dir.frames.iter().any(|frame| {
-                                        frame.next_x.is_some()
-                                            || frame.next_y.is_some()
-                                            || frame
-                                                .frm
-                                                .map(|frm| {
-                                                    let mut ext: String =
-                                                        frm.chars().rev().skip(1).take(2).collect();
-                                                    ext.make_ascii_lowercase();
-                                                    ext == "rf"
-                                                })
-                                                .unwrap_or(false)
-                                    })
+                if let Ok(fofrm) = &fofrm {
+                    if fofrm.effect.is_none()
+                        && fofrm.directions.len() == 1
+                        && !fofrm
+                            .directions
+                            .first()
+                            .map(|dir| {
+                                dir.frames.iter().any(|frame| {
+                                    frame.next_x.is_some()
+                                        || frame.next_y.is_some()
+                                        || frame
+                                            .frm
+                                            .map(|frm| {
+                                                let mut ext: String =
+                                                    frm.chars().rev().skip(1).take(2).collect();
+                                                ext.make_ascii_lowercase();
+                                                ext == "rf"
+                                            })
+                                            .unwrap_or(false)
                                 })
-                                .unwrap_or(false)
-                        {
-                            continue;
-                        }
+                            })
+                            .unwrap_or(false)
+                    {
+                        continue;
                     }
-                    _ => {}
                 }
                 println!(
                     "Parsing: '{}' from '{:?}': {:#?}",

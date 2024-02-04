@@ -1,6 +1,10 @@
 use nom::number::complete::be_u8;
-use nom_prelude::*;
+use nom_prelude::{
+    count_cap, err_to_kind, nom, parse_struct, tuple, ErrorKind, IResult, ParseError,
+};
 use serde::{Deserialize, Serialize};
+
+use crate::{NomSliceErrorKind, NomVerboseSliceError};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Palette {
@@ -45,18 +49,16 @@ pub fn load_palette<P: AsRef<std::path::Path>>(path: P) -> Result<Palette, Error
     let mut file = std::fs::File::open(path).map_err(Error::Io)?;
     let mut palette_buf = [0u8; 256 * 3];
     file.read_exact(&mut palette_buf).map_err(Error::Io)?;
-    let palette = err_to_kind(palette(&mut palette_buf)).map_err(Error::Nom)?;
+    let palette = err_to_kind(palette(&palette_buf)).map_err(Error::Nom)?;
     Ok(palette)
 }
 
-pub fn palette<'a>(buf: &'a [u8]) -> Result<(&'a [u8], Palette), nom::Err<(&'a [u8], ErrorKind)>> {
+pub fn palette(buf: &[u8]) -> Result<(&[u8], Palette), NomSliceErrorKind> {
     let (rest, palette) = parse_palette(buf)?;
     Ok((rest, palette))
 }
 
-pub fn palette_verbose<'a>(
-    buf: &'a [u8],
-) -> Result<(&'a [u8], Palette), nom::Err<nom::error::VerboseError<&'a [u8]>>> {
+pub fn palette_verbose(buf: &[u8]) -> Result<(&[u8], Palette), NomVerboseSliceError> {
     let (rest, palette) = parse_palette(buf)?;
     Ok((rest, palette))
 }

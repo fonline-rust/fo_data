@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use nom_prelude::{complete::*, *};
+use nom_prelude::{
+    alt,
+    complete::{char, tag},
+    end_of_line, fold_many0, line, map, nom, preceded, t_rn, IResult, ParseError,
+};
 
 use crate::PathError;
 
@@ -19,7 +23,7 @@ fn datafile_path(parent_folder: &Path) -> Result<PathBuf, Error> {
     let datafiles = parent_folder.join(DATAFILES_CFG);
     datafiles
         .canonicalize()
-        .path_err(&parent_folder, Error::Canonicalize)
+        .path_err(parent_folder, Error::Canonicalize)
 }
 
 fn changetime(path: &Path) -> Result<crate::ChangeTime, Error> {

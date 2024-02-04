@@ -1,4 +1,7 @@
-use fo_data::{crawler::shadowed_files, datafiles::parse_datafile};
+use fo_data::{
+    crawler::{shadowed_files, ShadowedFile},
+    datafiles::parse_datafile,
+};
 
 fn main() {
     let path = std::path::Path::new("../../../CL4RP")
@@ -7,7 +10,13 @@ fn main() {
     let archives = parse_datafile(&path).expect("Parse datafiles");
     let files = shadowed_files(&archives).expect("Find shadowed files");
     let mut total_size = 0;
-    for (name, size, old, new) in files {
+    for ShadowedFile {
+        name,
+        size,
+        first_source: old,
+        second_source: new,
+    } in files
+    {
         if old == new {
             continue;
         }

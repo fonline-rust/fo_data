@@ -14,8 +14,9 @@ pub enum Error {
         new: FileInfo,
     },
     LocalRewrite {
-        old: FileInfo,
-        new: FileInfo,
+        file: String,
+        old: FileLocation,
+        new: FileLocation,
     },
 }
 
@@ -50,25 +51,28 @@ impl Files {
     pub fn reconcile_paths(
         &mut self,
         paths: impl Iterator<Item = (u32, FileInfo)>,
-        mut on_shadow: impl FnMut(&FileInfo, &FileInfo) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        mut on_shadow: impl FnMut(String, &FileLocation, &FileLocation) -> Result<(), Error>,
+    ) -> Result<(), Box<Error>> {
         for (hash, file_info) in paths {
             match self.inner.entry(hash) {
                 Entry::Vacant(entry) => {
                     entry.insert(file_info);
                 }
                 Entry::Occupied(mut entry) => {
-                    let old = entry.get();
+                    let old = entry.get_mut();
                     if old.conventional_path != file_info.conventional_path {
-                        return Err(Error::Conflict {
+                        return Err(Box::new(Error::Conflict {
                             hash,
                             old: entry.remove(),
                             new: file_info,
-                        });
-                    } else {
-                        on_shadow(old, &file_info)?;
+                        }));
                     }
-                    entry.insert(file_info);
+                    on_shadow(
+                        file_info.conventional_path,
+                        &old.location,
+                        &file_info.location,
+                    )?;
+                    old.location = file_info.location;
                 }
             }
         }
@@ -78,10 +82,10 @@ impl Files {
 
 #[deprecated]
 pub fn gather_paths(archives: &[crate::FoArchive]) -> IntMap<u32, FileInfo> {
-    let paths = gather_paths_in_archives(&archives);
+    let paths = gather_paths_in_archives(archives);
     let mut files = Files::default();
     files
-        .reconcile_paths(paths.into_iter().flatten(), |_, _| Ok(()))
+        .reconcile_paths(paths.into_iter().flatten(), |_, _, _| Ok(()))
         .unwrap();
     files.inner
 }
@@ -105,7 +109,7 @@ pub fn gather_paths_in_archives(archives: &[crate::FoArchive]) -> Vec<Vec<(u32, 
                     continue;
                 }
                 let entry_name = entry.name();
-                let conventional_path = nom_prelude::make_path_conventional(entry_name);
+                let conventional_path = fformat_utils::make_path_conventional(entry_name);
 
                 let file_info = FileInfo::new_in_archive(
                     conventional_path,
@@ -131,7 +135,7 @@ pub fn gather_local_paths(parent: impl AsRef<Path>) -> Vec<(u32, FileInfo)> {
         .filter_map(|e| {
             let stripped = e.path().strip_prefix(parent.as_ref()).ok()?;
             let string = stripped.to_str()?;
-            let conventional_path = nom_prelude::make_path_conventional(string);
+            let conventional_path = fformat_utils::make_path_conventional(string);
 
             let file_info = FileInfo::new_local(conventional_path, e.into_path());
             let hash = file_info.hash();
@@ -140,9 +144,14 @@ pub fn gather_local_paths(parent: impl AsRef<Path>) -> Vec<(u32, FileInfo)> {
         .collect()
 }
 
-pub fn shadowed_files(
-    archives: &[crate::FoArchive],
-) -> Result<Vec<(String, u64, &Path, &Path)>, Error> {
+pub struct ShadowedFile<'a> {
+    pub name: String,
+    pub size: u64,
+    pub first_source: &'a Path,
+    pub second_source: &'a Path,
+}
+
+pub fn shadowed_files(archives: &[crate::FoArchive]) -> Result<Vec<ShadowedFile>, Box<Error>> {
     assert!(archives.len() <= u16::max_value() as usize);
 
     let mut shadowed = Vec::with_capacity(512);
@@ -151,26 +160,24 @@ pub fn shadowed_files(
 
     let mut files = Files::default();
 
-    files.reconcile_paths(paths.into_iter().flatten(), |old, new| {
-        match (&old.location, &new.location) {
-            (
-                &FileLocation::Archive {
-                    index: old_index, ..
-                },
-                &FileLocation::Archive {
-                    index,
-                    ref original_path,
-                    compressed_size,
-                },
-            ) => {
-                shadowed.push((
-                    original_path.clone(),
-                    compressed_size,
-                    archives[old_index as usize].path.as_path(),
-                    archives[index as usize].path.as_path(),
-                ));
-            }
-            _ => {}
+    files.reconcile_paths(paths.into_iter().flatten(), |name, old, new| {
+        if let (
+            &FileLocation::Archive {
+                index: old_index, ..
+            },
+            &FileLocation::Archive {
+                index,
+                compressed_size,
+                ..
+            },
+        ) = (old, new)
+        {
+            shadowed.push(ShadowedFile {
+                name,
+                size: compressed_size,
+                first_source: archives[old_index as usize].path.as_path(),
+                second_source: archives[index as usize].path.as_path(),
+            });
         }
         Ok(())
     })?;

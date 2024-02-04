@@ -12,6 +12,7 @@ sled-retriever = ["sled"]
 
 [dependencies]
 nom_prelude = { git = "https://github.com/fonline-rust/format_extras.git" }
+fformat_utils = { git = "https://github.com/fonline-rust/format_extras.git" }
 zip = "0.5"
 itertools = "0.9"
 #array-macro = "1.0"

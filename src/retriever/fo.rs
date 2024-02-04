@@ -92,12 +92,12 @@ impl super::Retriever for FoRetriever {
     fn file_by_path(&self, path: &str) -> Result<Vec<u8>, Self::Error> {
         let file_info = self.data.files.file_info(path).ok_or(Error::NotFound)?;
 
-        self.file_by_info(&file_info)
+        self.file_by_info(file_info)
     }
 }
 
-impl Into<crate::GetImageError> for Error {
-    fn into(self) -> crate::GetImageError {
-        crate::GetImageError::FoRetrieve(self)
+impl From<Error> for crate::GetImageError {
+    fn from(val: Error) -> Self {
+        crate::GetImageError::FoRetrieve(val)
     }
 }

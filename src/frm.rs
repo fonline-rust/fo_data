@@ -6,7 +6,12 @@ use nom::{
     error::context,
     number::complete::{be_i16, be_u16, be_u32},
 };
-use nom_prelude::*;
+use nom_prelude::{
+    count, count_array, count_cap, err_to_kind, many_array, nom, pair, ArrayVec, ErrorKind,
+    IResult, ParseError,
+};
+
+use crate::NomVerboseSliceError;
 
 pub type Arr6<V> = ArrayVec<[V; 6]>;
 
@@ -20,14 +25,12 @@ pub struct Frm<'a> {
     pub directions: Arr6<Direction<'a>>,
 }
 
-pub fn frm_verbose<'a>(
-    buf: &'a [u8],
-) -> Result<(&'a [u8], Frm<'a>), nom::Err<nom::error::VerboseError<&'a [u8]>>> {
+pub fn frm_verbose(buf: &[u8]) -> Result<(&[u8], Frm), NomVerboseSliceError> {
     let (rest, frm) = parse_frm(buf)?;
     Ok((rest, frm))
 }
 
-pub fn frm<'a>(buf: &'a [u8]) -> Result<Frm<'a>, FrmParseError> {
+pub fn frm(buf: &[u8]) -> Result<Frm, FrmParseError> {
     err_to_kind(parse_frm(buf))
 }
 

@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
 };
 
+use nom_prelude::nom;
 use serde::{Deserialize, Serialize};
 pub type PathMap<K, V> = BTreeMap<K, V>;
 pub type ChangeTime = std::time::SystemTime;
@@ -27,6 +28,9 @@ pub use crate::{
     retriever::{fo::FoRetriever, Retriever},
 };
 use crate::{crawler::Files, registry_cache::FoRegistryCache};
+
+pub type NomVerboseSliceError<'a> = nom::Err<nom::error::VerboseError<&'a [u8]>>;
+pub type NomSliceErrorKind<'a> = nom::Err<(&'a [u8], nom::error::ErrorKind)>;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum FileLocation {
@@ -90,7 +94,7 @@ impl FileInfo {
 }
 
 pub fn conventional_hash(path: &str) -> u32 {
-    let conventional_path = nom_prelude::make_path_conventional(path);
+    let conventional_path = fformat_utils::make_path_conventional(path);
     hash(conventional_path.as_bytes())
 }
 
@@ -131,7 +135,7 @@ pub enum DataType {
 pub enum DataInitError {
     LoadPalette(palette::Error),
     Datafiles(datafiles::Error),
-    GatherPaths(crawler::Error),
+    GatherPaths(Box<crawler::Error>),
     CacheSerialize(bincode::Error),
     CacheDeserialize(bincode::Error),
     CacheIO(std::io::Error),
@@ -285,12 +289,13 @@ impl FoRegistry {
 
         let mut files = Files::default();
         files
-            .reconcile_paths(paths_in_archives.into_iter().flatten(), |_, _| Ok(()))
+            .reconcile_paths(paths_in_archives.into_iter().flatten(), |_, _, _| Ok(()))
             .map_err(Error::GatherPaths)?;
 
         files
-            .reconcile_paths(local_paths.into_iter(), |old, new| match &old.location {
+            .reconcile_paths(local_paths.into_iter(), |file, old, new| match &old {
                 FileLocation::Local { .. } => Err(crawler::Error::LocalRewrite {
+                    file,
                     old: old.clone(),
                     new: new.clone(),
                 }),
@@ -538,7 +543,7 @@ mod tests {
         for (dir_index, dir) in frm.directions.iter().enumerate() {
             for (frame_index, frame) in dir.frames.iter().enumerate() {
                 save_frame(
-                    &frame,
+                    frame,
                     palette4.colors_tuples(),
                     format!(
                         "{}/output/HMWARRAA_{}_{}.png",
