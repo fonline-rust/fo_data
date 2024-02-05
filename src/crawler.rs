@@ -1,10 +1,9 @@
 use std::{collections::hash_map::Entry, io::BufReader, path::Path};
 
-use nohash_hasher::IntMap;
 use rayon::prelude::IntoParallelRefIterator;
 use serde::{Deserialize, Serialize};
 
-use crate::{FileInfo, FileLocation};
+use crate::{FileInfo, FileLocation, U32Map};
 
 #[derive(Debug)]
 pub enum Error {
@@ -20,9 +19,9 @@ pub enum Error {
     },
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Files {
-    inner: IntMap<u32, FileInfo>,
+    inner: U32Map<FileInfo>,
 }
 
 impl Files {
@@ -78,10 +77,23 @@ impl Files {
         }
         Ok(())
     }
+
+    pub fn forget_file(&mut self, conventional_path: &str) -> Option<FileInfo> {
+        self.forget_file_by_hash(crate::hash(conventional_path.as_bytes()))
+    }
+
+    pub fn forget_file_by_hash(&mut self, hash: u32) -> Option<FileInfo> {
+        self.inner
+            .remove(&hash)
+    }
+
+    pub fn drain_files(&mut self) -> impl '_ + ExactSizeIterator<Item = FileInfo> {
+        self.inner.drain().map(|(_, value)| value)
+    }
 }
 
 #[deprecated]
-pub fn gather_paths(archives: &[crate::FoArchive]) -> IntMap<u32, FileInfo> {
+pub fn gather_paths(archives: &[crate::FoArchive]) -> U32Map<FileInfo> {
     let paths = gather_paths_in_archives(archives);
     let mut files = Files::default();
     files
@@ -133,11 +145,12 @@ pub fn gather_local_paths(parent: impl AsRef<Path>) -> Vec<(u32, FileInfo)> {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .filter_map(|e| {
+            let meta = e.metadata().ok()?;
             let stripped = e.path().strip_prefix(parent.as_ref()).ok()?;
             let string = stripped.to_str()?;
             let conventional_path = fformat_utils::make_path_conventional(string);
 
-            let file_info = FileInfo::new_local(conventional_path, e.into_path());
+            let file_info = FileInfo::new_local(conventional_path, e.into_path(), meta.len());
             let hash = file_info.hash();
             Some((hash, file_info))
         })

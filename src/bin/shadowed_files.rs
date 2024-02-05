@@ -4,7 +4,7 @@ use fo_data::{
 };
 
 fn main() {
-    let path = std::path::Path::new("../../../CL4RP")
+    let path = std::path::Path::new("../client_tlj")
         .canonicalize()
         .unwrap();
     let archives = parse_datafile(&path).expect("Parse datafiles");

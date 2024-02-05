@@ -148,7 +148,7 @@ where
             }
         }
         FileType::FoFrm => {
-            let mut full_path = std::path::Path::new(path)
+            let parent_folder = std::path::Path::new(path)
                 .parent()
                 .ok_or(GetImageError::NoParentFolder)?
                 .to_owned();
@@ -173,28 +173,12 @@ where
 
             let relative_path = frame.frm.ok_or(GetImageError::NoFrame)?;
             //dbg!(&full_path, &relative_path);
-            for component in std::path::Path::new(relative_path).components() {
-                use std::path::Component;
-                if !match component {
-                    Component::ParentDir => full_path.pop(),
-                    Component::Normal(str) => {
-                        full_path.push(str);
-                        true
-                    }
-                    _ => false,
-                } {
-                    return Err(GetImageError::InvalidRelativePath(
-                        path.into(),
-                        relative_path.into(),
-                    ));
-                }
-            }
-            let full_path = fformat_utils::make_path_conventional(
-                full_path
-                    .to_str()
-                    .expect("Convert full path back to string"),
-            );
+
             //dbg!(&full_path);
+
+            let full_path = resolve_dep_path(&parent_folder, relative_path).ok_or_else(|| {
+                GetImageError::InvalidRelativePath(path.into(), relative_path.into())
+            })?;
 
             let mut image = get_raw(retriever, &full_path, recursion + 1, palette)
                 .map_err(GetImageError::recursion)?;
@@ -204,4 +188,62 @@ where
         }
         _ => return Err(GetImageError::FileType(file_type)),
     })
+}
+
+pub trait RetrieverExt: Retriever {
+    fn get_deps(&self, path: &str) -> Result<Vec<String>, GetImageError>
+    where
+        Self::Error: Into<GetImageError>,
+    {
+        let file_type = retriever::recognize_type(path);
+        match file_type {
+            FileType::FoFrm => {
+                let parent_folder = std::path::Path::new(path)
+                    .parent()
+                    .ok_or(GetImageError::NoParentFolder)?
+                    .to_owned();
+                let data = self.file_by_path(path).map_err(Into::into)?;
+
+                let string = std::str::from_utf8(&data).map_err(GetImageError::Utf8)?;
+                let fofrm = fofrm::parse_verbose(string).map_err(GetImageError::FoFrmParse)?;
+
+                fofrm
+                    .directions
+                    .iter()
+                    .flat_map(|direction| direction.frames.iter())
+                    .filter_map(|frame| frame.frm)
+                    .map(|relative_path| {
+                        resolve_dep_path(&parent_folder, relative_path).ok_or_else(|| {
+                            GetImageError::InvalidRelativePath(path.into(), relative_path.into())
+                        })
+                    })
+                    .collect()
+            }
+            _ => Ok(vec![]),
+        }
+    }
+}
+
+impl<T: Retriever> RetrieverExt for T {}
+
+fn resolve_dep_path(parent_folder: &Path, relative_path: &str) -> Option<String> {
+    let mut full_path = parent_folder.to_owned();
+    for component in std::path::Path::new(relative_path).components() {
+        use std::path::Component;
+        if !match component {
+            Component::ParentDir => full_path.pop(),
+            Component::Normal(str) => {
+                full_path.push(str);
+                true
+            }
+            _ => false,
+        } {
+            return None;
+        }
+    }
+    Some(fformat_utils::make_path_conventional(
+        full_path
+            .to_str()
+            .expect("Convert full path back to string"),
+    ))
 }

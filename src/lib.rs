@@ -6,7 +6,7 @@ pub mod fofrm;
 pub mod frm;
 pub mod palette;
 mod registry_cache;
-pub mod retriever;
+mod retriever;
 
 use std::{
     collections::{hash_map::DefaultHasher, BTreeMap},
@@ -23,14 +23,17 @@ pub type ChangeTime = std::time::SystemTime;
 pub use retriever::sled::SledRetriever;
 
 pub use crate::{
-    converter::{Converter, GetImageError, RawImage},
+    converter::{Converter, GetImageError, RawImage, RetrieverExt},
     palette::Palette,
-    retriever::{fo::FoRetriever, Retriever},
+    retriever::{fo::{FoRetriever, Error as FoRetrieverError}, Retriever},
 };
+
 use crate::{crawler::Files, registry_cache::FoRegistryCache};
 
 pub type NomVerboseSliceError<'a> = nom::Err<nom::error::VerboseError<&'a [u8]>>;
 pub type NomSliceErrorKind<'a> = nom::Err<(&'a [u8], nom::error::ErrorKind)>;
+
+pub type U32Map<V> = nohash_hasher::IntMap<u32, V>;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum FileLocation {
@@ -41,6 +44,7 @@ pub enum FileLocation {
     },
     Local {
         original_path: PathBuf,
+        disk_size: u64,
     },
 }
 
@@ -67,9 +71,12 @@ impl FileInfo {
         }
     }
 
-    pub fn new_local(conventional_path: String, original_path: PathBuf) -> Self {
+    pub fn new_local(conventional_path: String, original_path: PathBuf, disk_size: u64) -> Self {
         FileInfo {
-            location: FileLocation::Local { original_path },
+            location: FileLocation::Local {
+                original_path,
+                disk_size,
+            },
             conventional_path,
         }
     }
@@ -80,7 +87,16 @@ impl FileInfo {
                 .archives
                 .get(index as usize)
                 .map(|archive| &archive.path),
-            FileLocation::Local { original_path } => Some(original_path),
+            FileLocation::Local { original_path, .. } => Some(original_path),
+        }
+    }
+
+    pub fn size(&self) -> u64 {
+        match self.location {
+            FileLocation::Archive {
+                compressed_size, ..
+            } => compressed_size,
+            FileLocation::Local { disk_size, .. } => disk_size,
         }
     }
 
@@ -217,7 +233,7 @@ const DATA_PATH: &str = "data";
 
 impl FoRegistry {
     fn version() -> u32 {
-        1
+        2
     }
 
     pub fn stub() -> Self {

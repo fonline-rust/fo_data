@@ -11,7 +11,7 @@ pub trait Retriever {
     fn file_by_path(&self, path: &str) -> Result<Vec<u8>, Self::Error>;
 }
 
-pub fn recognize_type(path: &str) -> FileType {
+pub(crate) fn recognize_type(path: &str) -> FileType {
     move || -> Option<_> {
         let ext = Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
         Some(match ext.as_str() {

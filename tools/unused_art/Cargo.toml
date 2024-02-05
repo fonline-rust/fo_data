@@ -1,0 +1,10 @@
+[package]
+name = "fo_unused_art"
+version = "0.1.0"
+authors = ["qthree <qthree3@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+fo_data = { path = "../.." }
+fo_proto_format = { git = "https://github.com/fonline-rust/fo_proto_format.git" }
+fformat_utils = { git = "https://github.com/fonline-rust/format_extras.git" }

@@ -79,9 +79,9 @@ impl FoRetriever {
                 file.read_to_end(&mut buffer).map_err(Error::ArchiveRead)?;
                 Ok(buffer)
             }
-            FileLocation::Local { ref original_path } => {
-                std::fs::read(original_path).map_err(Error::LocalIO)
-            }
+            FileLocation::Local {
+                ref original_path, ..
+            } => std::fs::read(original_path).map_err(Error::LocalIO),
         }
     }
 }
